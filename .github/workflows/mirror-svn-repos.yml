@@ -1,0 +1,258 @@
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+name: Mirror SVN Repos
+
+on:
+  schedule:
+  - cron: '5 8,20 * * *'  # at 8:05,20:05 UTC
+  push:
+    branches-ignore:  # build all branches except:
+    - 'dependabot/**'  # prevent GHA triggered twice (once for commit to the branch and once for opening/syncing the PR)
+    tags-ignore:  # don't build tags
+    - '**'
+    paths-ignore:
+    - '**/*.md'
+    - '.git*'
+    - '.github/*.yml'
+    - '.github/workflows/keepalive.yml'
+    - '.github/workflows/mirror-git-repos.yml'
+  pull_request:
+    paths-ignore:
+    - '**/*.md'
+    - '.git*'
+    - '.github/*.yml'
+    - '.github/workflows/mirror-git-repos.yml'
+  workflow_dispatch:
+    # https://github.blog/changelog/2020-07-06-github-actions-manual-triggers-with-workflow_dispatch/
+
+
+defaults:
+  run:
+    shell: bash
+
+
+jobs:
+
+  ###########################################################
+  mirror-repos:
+  ###########################################################
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - target_repo_name: XigmaNAS
+          source_name: XigmaNAS
+          source_homepage: https://xigmanas.com/xnaswp/
+          source_repo_url: https://svn.code.sf.net/p/xigmanas/code
+          ignore_error: false
+          user_mapping: |
+            ms49434=Michael Schneider <ms49434@users.noreply.github.com>
+            daoyama=Daisuke Aoyama <daoyama@users.noreply.github.com>
+            zoon01=Michael Zoon <zoon01@users.noreply.github.com>
+            jmrp=J.M. Rivera <JRGTH@users.noreply.github.com>
+
+        # test repo
+        #- target_repo_name: uttsql
+        #  source_name: utTSQL
+        #  source_homepage: https://uttsql.sourceforge.net/
+        #  source_repo_url: https://svn.code.sf.net/p/uttsql/code
+        #  ignore_error: false
+
+        # test repo
+        #- target_repo_name: dxgettext
+        #  source_name: dxgettext
+        #  source_homepage: https://sourceforge.net/p/dxgettext
+        #  source_repo_url: https://svn.code.sf.net/p/dxgettext/code
+        #  ignore_error: false
+
+
+    # https://docs.github.com/en/actions/using-jobs/using-concurrency
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.target_repo_name }}
+      cancel-in-progress: false
+
+
+    steps:
+    - name: "Show: GitHub context"
+      env:
+        GITHUB_CONTEXT: ${{ toJSON(github) }}
+      run: echo $GITHUB_CONTEXT
+
+
+    - name: "Show: environment variables"
+      run: env | sort
+
+
+    - name: "Install Git SVN support"
+      run: |
+        set -eux
+
+        # avoid slow man page update
+        sudo dpkg-divert --divert /usr/bin/mandb.disabled --rename /usr/bin/mandb
+        sudo ln -s /bin/true /usr/bin/mandb
+
+        sudo add-apt-repository ppa:git-core/ppa
+        sudo apt-get update 
+        sudo apt-get install -y git-svn
+
+
+    - name: "Cache: Restore .git/svn metadata"
+      id: cache-restore-git
+      uses: actions/cache/restore@v4
+      with:
+        path: repo_mirror/.git
+        key: ${{ runner.os }}-mirror-${{ matrix.target_repo_name }}
+
+
+    - name: Generate GitHub App Token (1)
+      id: generate-token1
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ vars.TU_ID }}
+        private-key: ${{ secrets.TU_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+
+
+    - name: Create target Repository if required
+      env:
+        GH_TOKEN: ${{ steps.generate-token1.outputs.token }}
+      run: |
+        set -eux
+        repo_exists=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: token $GH_TOKEN" \
+          "https://api.github.com/repos/${{ github.repository_owner }}/${{ matrix.target_repo_name }}")
+
+        if [ "$repo_exists" -ne 200 ]; then
+          gh repo create ${{ github.repository_owner }}/${{ matrix.target_repo_name }} \
+            --homepage "${{ matrix.source_homepage }}" \
+            --disable-issues \
+            --disable-wiki \
+            --public \
+            --description "Unofficial READ-ONLY one-way mirror of ${{ matrix.source_name }}"
+        fi
+
+
+    - name: "Configure SVN User Mapping Script"
+      run: |
+        set -eux
+        echo '#!/bin/bash' > authors-prog.sh
+        echo 'case "$1" in' >> authors-prog.sh
+        echo "${{ matrix.user_mapping || '' }}" | while IFS= read -r line; do
+          if [ -n "$line" ]; then
+            svn_user=$(echo "$line" | cut -d'=' -f1)
+            git_user=$(echo "$line" | cut -d'=' -f2)
+            echo "  \"$svn_user\") echo \"$git_user\"; exit 0 ;; " >> authors-prog.sh
+          fi
+        done
+        echo '  *) echo "$1 <$1@example.com>"; exit 0 ;;' >> authors-prog.sh
+        echo 'esac' >> authors-prog.sh
+        chmod +x authors-prog.sh
+
+
+    - name: "Retrieve updates from ${{ matrix.source_name }}"
+      env:
+        GH_TOKEN: ${{ steps.generate-token1.outputs.token }}
+      continue-on-error: ${{ matrix.ignore_error || false }}
+      run: |
+        set -eux
+        git config --global init.defaultBranch main
+
+        if [ ! -d "repo_mirror/.git/svn" ]; then
+          echo "No cached .git/svn found; doing a fresh [git svn clone]..."
+          git svn clone --stdlayout --quiet \
+            --authors-prog=./authors-prog.sh \
+            --prefix "SVN_SOURCE/" \
+            "${{ matrix.source_repo_url }}" repo_mirror
+
+          cd repo_mirror
+          # Move branches from refs/remotes/SVN_SOURCE/.. to refs/remotes/SVN_SOURCE/branches/..
+          for ref in $(git for-each-ref --format='%(refname)' refs/remotes/SVN_SOURCE/); do
+            branch_name=$(basename "$ref")
+            if [[ "$ref" != refs/remotes/SVN_SOURCE/branches/* && \
+                  "$branch_name" != "trunk" && \
+                  "$ref" != refs/remotes/SVN_SOURCE/tags/* ]]; then
+              new_ref="refs/remotes/SVN_SOURCE/branches/$branch_name"
+              git update-ref "$new_ref" "$ref"
+              git update-ref -d "$ref" # delete old ref
+              echo "Moved $ref -> $new_ref"
+            fi
+          done
+        else
+          echo "Cached .git/svn found; doing incremental [git svn fetch]..."
+          cd repo_mirror
+          git config --replace-all svn-remote.svn.url ${{ matrix.source_repo_url }}
+          git config --replace-all svn-remote.svn.fetch trunk:refs/remotes/SVN_SOURCE/trunk
+          git config --replace-all svn-remote.svn.branches branches/*:refs/remotes/SVN_SOURCE/branches/*
+          git config --replace-all svn-remote.svn.tags tags/*:refs/remotes/SVN_SOURCE/tags/*
+          git svn fetch --authors-prog=../authors-prog.sh
+        fi
+
+
+    # Tokens expire after 1h, so we generate a new one after the potentially longer running previous step
+    - name: Generate GitHub App Token (2)
+      id: generate-token2
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ vars.TU_ID }}
+        private-key: ${{ secrets.TU_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+
+
+    - name: "Push updates to ${{ matrix.target_repo_name }}"
+      env:
+        GH_TOKEN: ${{ steps.generate-token2.outputs.token }}
+      continue-on-error: ${{ matrix.ignore_error || false }}
+      run: |
+        set -eux
+
+        cd repo_mirror
+
+        git remote remove origin || true
+        git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/${{ matrix.target_repo_name }}.git"
+
+        # List remotes
+        git remote -v
+
+        # List refs
+        git for-each-ref --format='%(refname)' refs/
+
+        # List branches
+        git branch -a
+
+        # List tag
+        git tag -l
+
+        # Push trunk -> main
+        git push --force origin refs/remotes/SVN_SOURCE/trunk:refs/heads/main
+
+        # Push branches
+        git push --force origin refs/remotes/SVN_SOURCE/branches/*:refs/heads/*
+
+        # Push tags
+        for remote_tag in $(git for-each-ref --format='%(refname:strip=4)' refs/remotes/SVN_SOURCE/tags/); do
+          # Create/update a local annotated tag pointing at the SVN reference
+          git tag -f "$remote_tag" "refs/remotes/SVN_SOURCE/tags/$remote_tag"
+        done
+        git push --force --tags
+
+
+    ##################################################
+    # Cache Update
+    # See https://github.com/actions/cache/issues/342#issuecomment-1399442670
+    ##################################################
+    - name: "Cache: Delete previous"
+      if: steps.cache-restore-git.outputs.cache-hit && !env.ACT
+      env:
+        GH_TOKEN: ${{ steps.generate-token2.outputs.token }}
+      run: |
+        set -eux
+        gh extension install actions/gh-actions-cache
+        # "|| true" is to avoid "Error: Resource not accessible by integration" from failing the job 
+        gh actions-cache delete --repo ${{ github.repository }} ${{ steps.cache-restore-git.outputs.cache-primary-key }} --confirm || true
+
+    - name: "Cache: Save .git/svn metadata"
+      uses: actions/cache/save@v4  # https://github.com/actions/cache/blob/main/save/README.md
+      with:
+        path: repo_mirror/.git
+        key: ${{ steps.cache-restore-git.outputs.cache-primary-key }}
