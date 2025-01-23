@@ -1,0 +1,146 @@
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+name: Mirror Git Repos
+
+on:
+  schedule:
+  - cron: '5 9,21 * * *'  # at 8:05,20:05 UTC
+  push:
+    branches-ignore:  # build all branches except:
+    - 'dependabot/**'  # prevent GHA triggered twice (once for commit to the branch and once for opening/syncing the PR)
+    tags-ignore:  # don't build tags
+    - '**'
+    paths-ignore:
+    - '**/*.md'
+    - '.git*'
+    - '.github/*.yml'
+    - '.github/workflows/keepalive.yml'
+    - '.github/workflows/mirror-svn-repos.yml'
+  pull_request:
+    paths-ignore:
+    - '**/*.md'
+    - '.git*'
+    - '.github/*.yml'
+    - '.github/workflows/mirror-svn-repos.yml'
+  workflow_dispatch:
+    # https://github.blog/changelog/2020-07-06-github-actions-manual-triggers-with-workflow_dispatch/
+
+
+defaults:
+  run:
+    shell: bash
+
+
+jobs:
+
+  ###########################################################
+  mirror-repos:
+  ###########################################################
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - target_repo_name: eclipse-subversive
+          source_name: Eclipse Subversive SVN Team Provider
+          source_homepage: https://projects.eclipse.org/projects/technology.subversive
+          source_repo_url: https://gitlab.eclipse.org/eclipse/subversive/subversive.git
+          ignore_error: false
+        - target_repo_name: eclipse-xwt
+          source_name: Eclipse XWT
+          source_homepage: https://projects.eclipse.org/projects/technology.xwt
+          source_repo_url: https://gitlab.eclipse.org/eclipse/xwt/org.eclipse.xwt.git
+          ignore_error: false
+        - target_repo_name: forgejo
+          source_name: Forgejo
+          source_homepage: https://forgejo.org
+          source_repo_url: https://codeberg.org/forgejo/forgejo.git
+          ignore_error: false
+        - target_repo_name: forgejo-as-gitea-fork
+          source_name: Forgejo
+          source_homepage: https://forgejo.org
+          source_repo_url: https://codeberg.org/forgejo/forgejo.git
+          ignore_error: false
+        - target_repo_name: gitea-act-runner
+          source_name: Gitea Act Runner
+          source_homepage: https://gitea.com/gitea/act_runner
+          source_repo_url: https://gitea.com/gitea/act_runner.git
+          ignore_error: false
+        - target_repo_name: gitea-helm-chart
+          source_name: Gitea Helm Chart
+          source_homepage: https://gitea.com/gitea/helm-chart
+          source_repo_url: https://gitea.com/gitea/helm-chart.git
+          ignore_error: false
+
+
+    # https://docs.github.com/en/actions/using-jobs/using-concurrency
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.target_repo_name }}
+      cancel-in-progress: false
+
+
+    steps:
+    - name: "Show: GitHub context"
+      env:
+        GITHUB_CONTEXT: ${{ toJSON(github) }}
+      run: echo $GITHUB_CONTEXT
+
+
+    - name: "Show: environment variables"
+      run: env | sort
+
+
+    - name: Generate GitHub App Token
+      id: generate-token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ vars.TU_ID }}
+        private-key: ${{ secrets.TU_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+
+
+    - name: Create target Repository if required
+      env:
+        GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+      run: |
+        set -eux
+        repo_exists=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: token $GH_TOKEN" \
+          "https://api.github.com/repos/${{ github.repository_owner }}/${{ matrix.target_repo_name }}")
+
+        if [ "$repo_exists" -ne 200 ]; then
+          gh repo create ${{ github.repository_owner }}/${{ matrix.target_repo_name }} \
+            --homepage "${{ matrix.source_homepage }}" \
+            --disable-issues \
+            --disable-wiki \
+            --public \
+            --description "Unofficial READ-ONLY one-way mirror of ${{ matrix.source_name }}"
+        fi
+
+
+    - name: Mirror [${{ matrix.source_name }}]
+      env:
+        GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+      continue-on-error: ${{ matrix.ignore_error || false }}
+      run: |
+        set -eux
+
+        git clone --mirror "${{ matrix.source_repo_url }}" source_repo 
+        cd source_repo
+        git remote set-url --push origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/${{ matrix.target_repo_name }}"
+        git config --add remote.origin.fetch '^refs/changes/*' # ignore Gerrit changesets
+        git config --add remote.origin.fetch '^refs/pull/*'    # ignore PRs 
+
+        { echo "::group::git fetch"; } 2> /dev/null
+           git fetch --prune --prune-tags --verbose origin
+        { echo "::endgroup::"; } 2> /dev/null
+
+        # purge any potential PRs/Gerrit changesets from initial import
+        git for-each-ref --format 'delete %(refname)' refs/pull/* refs/changes/* | git update-ref --stdin
+
+        # git push --mirror 
+        # |-> results in remote: Internal Server Error, see https://github.com/isaacs/github/issues/1253
+
+        # workaround:
+        git config --unset remote.origin.mirror # https://stackoverflow.com/a/49339040/5116073
+        git for-each-ref --format="%(refname)" --sort=authordate refs/heads | xargs git push --force --verbose origin # https://stackoverflow.com/a/65416524/5116073
