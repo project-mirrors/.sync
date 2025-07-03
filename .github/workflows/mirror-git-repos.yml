@@ -46,30 +46,45 @@ jobs:
           source_homepage: https://projects.eclipse.org/projects/technology.subversive
           source_repo_url: https://gitlab.eclipse.org/eclipse/subversive/subversive.git
           ignore_error: false
+
         - target_repo_name: eclipse-xwt
           source_name: Eclipse XWT
           source_homepage: https://projects.eclipse.org/projects/technology.xwt
           source_repo_url: https://gitlab.eclipse.org/eclipse/xwt/org.eclipse.xwt.git
           ignore_error: false
+
         - target_repo_name: forgejo
           source_name: Forgejo
           source_homepage: https://forgejo.org
           source_repo_url: https://codeberg.org/forgejo/forgejo.git
-          ignore_error: false
         - target_repo_name: forgejo-as-gitea-fork
           source_name: Forgejo
           source_homepage: https://forgejo.org
           source_repo_url: https://codeberg.org/forgejo/forgejo.git
           ignore_error: false
+
+        - target_repo_name: forgejo-runner
+          source_name: Forgejo Runner
+          source_homepage: https://forgejo.org
+          source_repo_url: https://code.forgejo.org/forgejo/runner.git
+          ignore_error: false
+        - target_repo_name: forgejo-runner-as-gitea-act-runner-fork
+          source_name: Forgejo Runner
+          source_homepage: https://forgejo.org
+          source_repo_url: https://code.forgejo.org/forgejo/runner.git
+          ignore_error: false
+
         - target_repo_name: gitea-act-runner
           source_name: Gitea Act Runner
           source_homepage: https://gitea.com/gitea/act_runner
           source_repo_url: https://gitea.com/gitea/act_runner.git
           ignore_error: false
+
         - target_repo_name: gitea-as-gogs-fork
           source_name: Gitea
           source_homepage: https://github.com/go-gitea/gitea
           source_repo_url: https://github.com/go-gitea/gitea.git
+
         - target_repo_name: gitea-helm-chart
           source_name: Gitea Helm Chart
           source_homepage: https://gitea.com/gitea/helm-chart
