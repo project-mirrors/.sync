@@ -63,6 +63,12 @@ jobs:
           source_repo_url: https://codeberg.org/forgejo/forgejo.git
           ignore_error: false
 
+        - target_repo_name: forgejo-helm
+          source_name: Forgejo Helm Chart
+          source_homepage: https://forgejo.org
+          source_repo_url: https://code.forgejo.org/forgejo-helm/forgejo-helm.git
+          ignore_error: false
+
         - target_repo_name: forgejo-runner
           source_name: Forgejo Runner
           source_homepage: https://forgejo.org
