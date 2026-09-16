@@ -110,7 +110,7 @@ jobs:
       id: generate-token1
       uses: actions/create-github-app-token@v3
       with:
-        app-id: ${{ vars.TU_ID }}
+        client-id: ${{ vars.TU_ID }}
         private-key: ${{ secrets.TU_PRIVATE_KEY }}
         owner: ${{ github.repository_owner }}
 
@@ -195,7 +195,7 @@ jobs:
       id: generate-token2
       uses: actions/create-github-app-token@v3
       with:
-        app-id: ${{ vars.TU_ID }}
+        client-id: ${{ vars.TU_ID }}
         private-key: ${{ secrets.TU_PRIVATE_KEY }}
         owner: ${{ github.repository_owner }}
 
