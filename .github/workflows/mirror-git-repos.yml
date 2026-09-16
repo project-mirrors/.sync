@@ -1,9 +1,10 @@
-# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
+# https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
 name: Mirror Git Repos
 
-on:
+on:  # https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
   schedule:
-  - cron: '5 9,21 * * *'  # at 8:05,20:05 UTC
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule
+    - cron: '5 9,21 * * *'  # at 8:05,20:05 UTC
   push:
     branches-ignore:  # build all branches except:
     - 'dependabot/**'  # prevent GHA triggered twice (once for commit to the branch and once for opening/syncing the PR)
@@ -22,7 +23,7 @@ on:
     - '.github/*.yml'
     - '.github/workflows/mirror-svn-repos.yml'
   workflow_dispatch:
-    # https://github.blog/changelog/2020-07-06-github-actions-manual-triggers-with-workflow_dispatch/
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch
 
 
 defaults:
