@@ -99,7 +99,7 @@ jobs:
 
     - name: "Cache: Restore .git/svn metadata"
       id: cache-restore-git
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@v6
       with:
         path: repo_mirror/.git
         key: ${{ runner.os }}-mirror-${{ matrix.target_repo_name }}
@@ -252,7 +252,7 @@ jobs:
         gh actions-cache delete --repo ${{ github.repository }} ${{ steps.cache-restore-git.outputs.cache-primary-key }} --confirm || true
 
     - name: "Cache: Save .git/svn metadata"
-      uses: actions/cache/save@v5  # https://github.com/actions/cache/blob/main/save/README.md
+      uses: actions/cache/save@v6  # https://github.com/actions/cache/blob/main/save/README.md
       with:
         path: repo_mirror/.git
         key: ${{ steps.cache-restore-git.outputs.cache-primary-key }}
