@@ -93,9 +93,11 @@ jobs:
         sudo dpkg-divert --divert /usr/bin/mandb.disabled --rename /usr/bin/mandb
         sudo ln -s /bin/true /usr/bin/mandb
 
-        sudo add-apt-repository ppa:git-core/ppa
-        sudo apt-get update 
-        sudo apt-get install -y git-svn
+        sudo apt-get update
+        # Keep all Git packages on the Ubuntu version; runners may preinstall newer PPA builds.
+        git_version=$(LC_ALL=C apt-cache policy git-svn | awk '/Candidate:/ {print $2}')
+        sudo apt-get install -y --allow-downgrades \
+          "git=$git_version" "git-man=$git_version" "git-svn=$git_version"
 
 
     - name: "Cache: Restore .git/svn metadata"
